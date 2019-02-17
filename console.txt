@@ -1,0 +1,85 @@
+
+1. SMTP
+openssl s_client -connect smtp.yandex.ru:25 -starttls smtp
+AUTH LOGIN
+bnV0dHlydW5uZXI=
+Base64 от пароля
+mail from: nuttyrunner@yandex.ru
+rcpt to: nuttyrunner@gmail.com
+DATA
+From: nuttyrunner@yandex.ru
+To: nuttyrunner@gmail.com
+Subject: Welcome
+
+Hello, my friend
+.
+
+2. POP3
+openssl s_client -crlf -ign_eof -connect pop.yandex.ru:995
+user nuttyrunner
+pass ПАРОЛЬ
+list
+retr 105
+
+AUTH LOGIN
+bnV0dHlydW5uZXI=
+Base64 от пароля
+mail from: nuttyrunner@yandex.ru
+rcpt to: nuttyrunner@gmail.com
+DATA
+From: nuttyrunner@yandex.ru
+To: nuttyrunner@gmail.com
+Subject: Welcome
+
+Hello, my friend
+.
+
+3. IMAP
+openssl s_client -connect imap.yandex.ru:993 -crlf
+a1 LOGIN nuttyrunner@yandex.ru ПАРОЛЬ
+a2 select inbox
+a2 FETCH 105 full
+a2 FETCH 105 BODY[TEXT]
+
+4. HTTP
+
+telnet yandex.ru 80
+GET / HTTP/1.1
+Host: yandex.ru
+
+5. FTP
+
+ftp ftp.sunet.se
+anonymous
+
+pass
+ls
+cd about
+get graph.png
+
+(файл в Home/alexander)
+6. TFTP
+Сервер:
+alexander@alexander-ThinkPad-T420s:~$ sudo nc -ul 127.0.0.1 69
+FILEnetasciiFILEnetasciiFILEnetasciiFILEnetasciiFILEnetascii
+
+Где первый символ это 0x01, то есть поступают запросы на Read Request в режиме передачи с перекодированием в ASCII
+
+Клиент:
+alexander@alexander-ThinkPad-T420s:~$ sudo tftp 127.0.0.1
+tftp> get FILE
+Transfer timed out.
+
+7. WebDAV
+Создадим папку
+alexander@alexander-ThinkPad-T420s:~$ curl -X MKCOL --user "nuttyrunner:ПАРОЛЬ" https://webdav.yandex.ru/new_folder
+Создадим локальный файл
+alexander@alexander-ThinkPad-T420s:~$ echo bla bla bla > text.txt
+Создадим удалённый файл с таким же содержанием
+alexander@alexander-ThinkPad-T420s:~$ curl -T ./text.txt --user "nuttyrunner:ПАРОЛЬ" https://webdav.yandex.ru/new_folder/text.txt
+Скачаем наш файл
+alexander@alexander-ThinkPad-T420s:~$ curl -O --user "nuttyrunner:ПАРОЛЬ" https://webdav.yandex.ru/new_folder/text.txt
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100    12  100    12    0     0     61      0 --:--:-- --:--:-- --:--:--    61
+alexander@alexander-ThinkPad-T420s:~$ 
