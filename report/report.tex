@@ -1,0 +1,109 @@
+\include{settings}
+
+\begin{document}	% начало документа
+
+% Титульная страница
+\include{titlepage}
+
+\pagestyle{empty} 
+\include{ToC} 
+\pagestyle{plain} 
+\setcounter{page}{3}
+
+
+\section{Цель работы}
+Познакомиться с основами проектирования схемы БД, способами
+организации данных в SQL-БД.
+
+\section{Программа работы}
+\begin{itemize}
+\item Создание проекта для работы в GitLab.
+\item Выбор задания (предметной области), описание набора данных и
+требований к хранимым данным в свободном формате в wiki своего
+проекта в GitLab.
+\item Формирование в свободном формате (предпочтительно в виде
+графической схемы) cхемы БД, соответствующей заданию. Должно
+получиться не менее 7 таблиц.
+\item Согласование с преподавателем схемы БД. Обоснование принятых
+решений и соответствия требованиям выбранного задания.
+\item Выкладывание схемы БД в свой проект в GitLab.
+\item Демонстрация результатов преподавателю.
+\end{itemize}
+
+\section{Ход выполнения работы}
+\subsection{Задание}
+\begin{itemize}
+\item Проект в GitLab: \url{http://gitlab.icc.spbstu.ru/Hexlord/galaxy_db}
+\item Название: Галактическая торговая коалиция
+\end{itemize}
+\subsection{Содержание БД}
+\begin{enumerate}
+
+\item {\it system} -- содержит список солнечных систем
+\begin{enumerate}
+\item {\it name} -- название солнечной системы
+\end{enumerate}
+
+\item {\it planet} -- содержит список планет
+\begin{enumerate}
+\item {\it name} -- название планеты
+\item {\it system\_id} -- номер солнечной системы
+\end{enumerate}
+
+\item {\it crew} -- содержит список членов команды
+\begin{enumerate}
+\item {\it name} -- имя члена команды
+\item {\it ship\_id} -- номер корабля
+\end{enumerate}
+
+\item {\it ship\_type} -- содержит список типов кораблей
+\begin{enumerate}
+\item {\it name} -- название типа корабля
+\item {\it speed} -- максимальная тяга корабля в g
+\end{enumerate}
+
+\item {\it ship} -- содержит список кораблей
+\begin{enumerate}
+\item {\it pilot\_id} -- номер пилота
+\item {\it ship\_type\_id} -- номер типа корабля
+\end{enumerate}
+
+\item {\it planet\_ship} -- содержит список связей между планетами и кораблями, которые совершили на них посадку
+\begin{enumerate}
+\item {\it planet\_id} -- номер планеты
+\item {\it ship\_id} -- номер корабля
+\end{enumerate}
+
+\item {\it item\_type} -- содержит список типов предметов
+\begin{enumerate}
+\item {\it name} -- название предмета
+\item {\it description} -- описание предмета
+\end{enumerate}
+
+\item {\it item} -- содержит список предметов
+\begin{enumerate}
+\item {\it item\_type\_id} -- номер типа предмета
+\item {\it quantity} -- количество предметов
+\end{enumerate}
+
+\item {\it ship\_item} -- содержит список связей между кораблями и их предметами
+\begin{enumerate}
+\item {\it ship\_id} -- номер корабля
+\item {\it item\_id} -- номер предмета
+\end{enumerate}
+
+\end{enumerate}
+
+\subsection{Схема}
+
+\begin{figure}[H]
+	\begin{center}
+  		\makebox[\textwidth]{\includegraphics[scale=0.6]{../../galaxy_db.png}}
+		\caption{Созданная схема galaxy} 
+		\label{pic:scheme_galaxy} % название для ссылок внутри кода
+	\end{center}
+\end{figure}
+
+\section{Выводы}
+Удалось спроектировать схему базы данных, которая удовлетворяет постановленному заданию. Для этого были созданы таблицы с необходимыми ограничениями для контроля за качеством входящих данных. Использованы списки связей типа один-многие, что было предложено преподавателем. Любые категории данных представлены в виде записей в таблицах, то есть система максимально расширяема. Данные не дублируются, аномалий нет.
+\end{document}
