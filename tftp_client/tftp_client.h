@@ -5,9 +5,12 @@
 #include <chrono>
 #include <vector>
 #include <mutex>
+#include <sstream>
 
 namespace tftp
 {
+
+using std::istringstream;
 
 using Mutex = std::mutex;
 
@@ -19,7 +22,7 @@ using Socket = int32_t;
 using Time = uint64_t;
 
 constexpr Time Tftp_timeout_ms = 1000;
-constexpr Time Tftp_quant_ms = 250;
+constexpr Time Tftp_quant_ms = 25;
 constexpr I32 Tftp_ack_attempts = 4;
 
 struct Address
@@ -78,6 +81,7 @@ struct Tftp_command
 	};
 	Type type{ Type::Get_file };
 	string file_name;
+	string destination_name;
 };
 
 inline string To_string(const Tftp_command::Type& command_type)
@@ -156,24 +160,72 @@ public:
 	}
 
 	bool is_running() const { return running; }
+
+	bool send_package(const Package& package)
+	{
+		sockaddr_in target;
+		target.sin_family = AF_INET;
+		inet_pton(AF_INET, package.address.ip.c_str(), &target.sin_addr);
+		target.sin_port = htons(package.address.port);
+
+		vector<Byte> data = package.packet.get_bytes();
+
+		Log("Sending package: " + To_string(package.packet));
+
+		auto send_result = sendto(socket_descriptor, data.data(), data.size(), 0, (const sockaddr*)(&target), sizeof(target));
+		if (send_result <= 0)
+		{
+			Err("Failed to send a package to " + To_string(package.address));
+			return false;
+		}
+		return true;
+	}
+
+	Tftp_mode get_mode() const { return mode; }
+	void set_mode(Tftp_mode new_mode)  { mode = new_mode; }
+
 private:
 
-	vector<Package> pull_data_packages(Word packet_number, Address address)
+
+	vector<Package> pull_data_packages(Word packet_number)
 	{
 		vector<Package> result;
 
 		vector<Package> packages = pull_packages();
 		for (auto& package : packages)
 		{
-			if (package.address == address &&
-				package.packet.get_op() == Tftp_operation::Data &&
+			Log("Pulled package " + To_string(package.packet));
+
+			if (package.packet.get_op() == Tftp_operation::Data &&
 				package.packet.get_word(2) == packet_number)
 			{
 				result.push_back(package);
 				continue;
 			}
 
-			Err("Unexpected package, dropping: " + To_string(package));
+			Err("Unexpected package, dropping");
+		}
+
+		return result;
+	}
+
+	vector<Package> pull_ack_packages(Word packet_number)
+	{
+		vector<Package> result;
+
+		vector<Package> packages = pull_packages();
+		for (auto& package : packages)
+		{
+			Log("Pulled package " + To_string(package.packet));
+
+			if (package.packet.get_op() == Tftp_operation::Ack &&
+				package.packet.get_word(2) == packet_number)
+			{
+				result.push_back(package);
+				continue;
+			}
+
+			Err("Unexpected package, dropping");
 		}
 
 		return result;
@@ -191,79 +243,166 @@ private:
 		return result;
 	}
 
-	bool execute(const Tftp_command& command)
+	bool execute_get(string file_name, string destination_name)
 	{
 		Word packet_number{ 1 };
+		Log("Getting file " + file_name + " into " + destination_name);
+		std::ofstream out(destination_name, std::ofstream::binary);
+		size_t total_size{ 0 };
+
+		I32 attempts = Tftp_ack_attempts;
+
+		Package request = { server_address, Create_read(file_name, mode) };
+		Package response;
+
+		bool finished{ false };
+
+		while (attempts > 0)
+		{
+			/*
+			 * Send out request / acknowledge
+			 */
+			send_package(request);
+
+			if (finished)
+			{
+				out.flush();
+				return true;
+			}
+
+			Time quant_time{ 0 };
+			while (quant_time < Tftp_timeout_ms)
+			{
+				vector<Package> packages = pull_data_packages(packet_number);
+				if (packages.size() > 0)
+				{
+					response = packages[0];
+					break;
+				}
+
+				std::this_thread::sleep_for(
+					std::chrono::milliseconds(Tftp_quant_ms));
+				quant_time += Tftp_quant_ms;
+			}
+			if (quant_time < Tftp_timeout_ms) // Answer received
+			{
+				attempts = Tftp_ack_attempts;
+				request = { response.address, Create_ack(packet_number) };
+				++packet_number;
+
+				string block = response.packet.get_string(4, response.packet.size() - 4);
+				total_size += block.size();
+				out << block;
+
+				if (response.packet.size() < Tftp_packet_datagram_size)
+				{
+					// Finished
+					Log("File of size " + std::to_string(total_size) + " bytes received");
+					finished = true;
+				}
+			}
+			else
+			{
+				--attempts;
+				Log("Timeout passed, resending package: " + To_string(request));
+			}
+
+
+		}
+		return false;
+	}
+
+	bool execute_put(string file_name, string destination_name)
+	{
+		Byte buffer[Tftp_packet_datagram_size - 4];
+		Word packet_number{ 0 };
+		Log("Putting file " + file_name + " into " + destination_name);
+		std::ifstream in(file_name, std::ofstream::binary);
+		if (!in.good())
+		{
+			Err("Could not read from file " + file_name);
+			return false;
+		}
+		I32 total_size{ 0 };
+		I32 last_size{ Tftp_packet_data_size };
+
+		I32 attempts = Tftp_ack_attempts;
+
+		Package request = { server_address, Create_write(file_name, mode) };
+		Package response;
+
+		while (attempts > 0)
+		{
+			/*
+			 * Send out request / data
+			 */
+			send_package(request);
+
+			Time quant_time{ 0 };
+			while (quant_time < Tftp_timeout_ms)
+			{
+				vector<Package> packages = pull_ack_packages(packet_number);
+				if (packages.size() > 0)
+				{
+					response = packages[0];
+					break;
+				}
+
+				std::this_thread::sleep_for(
+					std::chrono::milliseconds(Tftp_quant_ms));
+				quant_time += Tftp_quant_ms;
+			}
+			if (quant_time < Tftp_timeout_ms) // Answer received
+			{
+				if (last_size < Tftp_packet_data_size)
+				{
+					Log("File of size " + std::to_string(total_size) + " bytes transmitted");
+					return true;
+				}
+
+				attempts = Tftp_ack_attempts;
+
+				in.read((char*)&buffer[0], Tftp_packet_data_size);
+
+				last_size = static_cast<I32>(in.gcount());
+				++packet_number;
+				request = { response.address, Create_data(packet_number, buffer, last_size) };
+
+				total_size += last_size;
+								
+			}
+			else
+			{
+				--attempts;
+				Log("Timeout passed, resending package: " + To_string(request));
+			}
+
+
+		}
+		return false;
+	}
+
+	bool execute(const Tftp_command& command)
+	{
+		// remove old data
+		pull_packages();
+		
 		if (command.type == Tftp_command::Type::Get_file)
 		{
-			I32 attempts = Tftp_ack_attempts;
-
-			Package request = { server_address, Create_read(command.file_name) };
-			Package response;
-
-			while (attempts > 0)
-			{
-				send_package(request);
-
-				Time quant_time{ 0 };
-				while (quant_time < Tftp_timeout_ms)
-				{
-					vector<Package> packages;
-					packages = pull_data_packages(packet_number, request.address);
-					if (packages.size() > 0)
-					{
-						response = packages[0];
-						break;
-					}
-
-					std::this_thread::sleep_for(
-						std::chrono::milliseconds(Tftp_quant_ms));
-					quant_time += Tftp_quant_ms;
-				}
-				if (quant_time < Tftp_timeout_ms) // Data found
-				{
-					attempts = Tftp_ack_attempts;
-					++packet_number;
-
-					string block = response.packet.get_string(4, Tftp_packet_data_size);
-					Out(block, false);
-
-					if (response.packet.size() - 4 < Tftp_packet_data_size)
-					{
-						// Finished
-						Log("File data received");
-					}
-					else
-					{
-						request = { server_address, Create_ack(
-						static_cast<Word>(static_cast<I32>(packet_number) - 1)) };
-					}
-				}
-				else
-				{
-					--attempts;
-					Log("Timeout passed, resending package: " + To_string(request));
-				}
-
-				
-			}
-			if (attempts == 0)
-			{
-				Err("Command out of attempts: " + To_string(command));
-				return false;
-			}
-
+			return execute_get(command.file_name, command.destination_name);
 		}
 		else if (command.type == Tftp_command::Type::Send_file)
 		{
-			Err("File send not implemented");
+			return execute_put(command.file_name, command.destination_name);
 		}
 		else if (command.type == Tftp_command::Type::Quit)
 		{
 			Log("Quit command received, terminating socket");
 			terminate();
+			return true;
 		}
-		return true;
+
+		return false;
 	}
 
 	void execute_thread()
@@ -302,6 +441,8 @@ private:
 			{
 				Mutex_guard gate_out(packages_mutex);
 
+				Log("Received package " + To_string(package.packet));
+
 				packages.push_back(package);
 			}
 		}
@@ -316,18 +457,18 @@ private:
 		U32 addr_size = sizeof(addr);
 
 		vector<Byte> data;
-		data.resize(Tftp_packet_total_size);
+		data.resize(Tftp_packet_datagram_size);
 		ssize_t received = recvfrom(
 			socket_descriptor,
 			&data[0],
-			sizeof(Byte) * Tftp_packet_data_size,
+			sizeof(Byte) * Tftp_packet_datagram_size,
 			0,
 			(sockaddr*)&addr,
 			&addr_size);
 
 		if (received <= 0) return false;
 
-		bool good = out.packet.add(data.data(), static_cast<I32>(received));
+		bool good = out.packet.add(data.data(), static_cast<I32>(received), false);
 		if (!good) return false;
 
 		out.address.ip = inet_ntop(AF_INET, &addr.sin_addr, (char*)&data[0], INET_ADDRSTRLEN);
@@ -335,23 +476,6 @@ private:
 		return true;
 	}
 
-	bool send_package(const Package& package)
-	{
-		sockaddr_in target;
-		target.sin_family = AF_INET;
-		inet_pton(AF_INET, package.address.ip.c_str(), &target.sin_addr);
-		target.sin_port = htons(package.address.port);
-
-		vector<Byte> data = package.packet.get_bytes();
-
-		auto send_result = sendto(socket_descriptor, data.data(), data.size(), 0, (const sockaddr*)(&target), sizeof(target));
-		if (send_result <= 0)
-		{
-			Err("Failed to send a package to " + To_string(package.address));
-			return false;
-		}
-		return true;
-	}
 
 	void terminate()
 	{
@@ -362,6 +486,8 @@ private:
 	}
 
 	bool running{ false };
+
+	Tftp_mode mode{ Tftp_mode::Netascii };
 
 	Address server_address;
 	Socket socket_descriptor{ 0 };

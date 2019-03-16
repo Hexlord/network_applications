@@ -20,22 +20,78 @@ void command_thread(Tftp_client& client)
 		string line;
 		std::getline(std::cin, line);
 
-		if (line == "quit")
+		vector<string> tokens = Split(line, ' ');
+		auto count = tokens.size();
+
+		if (count == 1 &&
+			tokens[0] == "quit")
 		{
 			command.type = Tftp_command::Type::Quit;
 			client.order(command);
 			break;
 		}
-		else if (starts_with(line, "get "))
+		else if (count == 1 &&
+			tokens[0] == "mode")
+		{
+			Log("Using " + To_string(client.get_mode()) + " mode");
+			continue;
+		}
+		else if (count == 2 &&
+			tokens[0] == "mode")
+		{
+			if (tokens[1] == "netascii")
+			{
+				client.set_mode(Tftp_mode::Netascii);
+				Log("Using " + To_string(client.get_mode()) + " mode");
+				continue;
+			}
+			else if (tokens[1] == "octet")
+			{
+				client.set_mode(Tftp_mode::Octet);
+				Log("Using " + To_string(client.get_mode()) + " mode");
+				continue;
+			}
+		}
+		else if (count == 2 &&
+			tokens[0] == "get")
 		{
 			command.type = Tftp_command::Type::Get_file;
-			command.file_name = line.substr(4);
+			command.file_name = tokens[1];
+			// get file name as destination
+			command.destination_name = Split(command.file_name, '/').back();
 			client.order(command);
+			continue;
 		}
-		else
+		else if (count == 3 &&
+			tokens[0] == "get")
 		{
-			std::cout << "Commands: quit, get <filename>, put <filename>" << std::endl;
+			command.type = Tftp_command::Type::Get_file;
+			command.file_name = tokens[1];
+			command.destination_name = tokens[2];
+			client.order(command);
+			continue;
 		}
+		else if (count == 2 &&
+			tokens[0] == "put")
+		{
+			command.type = Tftp_command::Type::Send_file;
+			command.file_name = tokens[1];
+			// get file name as destination
+			command.destination_name = Split(command.file_name, '/').back();
+			client.order(command);
+			continue;
+		}
+		else if (count == 3 &&
+			tokens[0] == "put")
+		{
+			command.type = Tftp_command::Type::Send_file;
+			command.file_name = tokens[1];
+			command.destination_name = tokens[2];
+			client.order(command);
+			continue;
+		}
+
+		std::cout << "Commands: \nquit\nget <filename> <destination>\nput <filename> <destination>\nmode\nmode [octet, netascii]\n" << std::endl;
 	}
 }
 
@@ -45,7 +101,7 @@ int main(int argc, char* argv[])
 	if (argc < 2)
 	{
 		std::cout << "No address specified\n";
-		server.ip = "127.0.0.1";
+		server.ip = "192.168.0.100";
 	}
 	else
 	{
@@ -59,6 +115,13 @@ int main(int argc, char* argv[])
 	{
 		return 1;
 	}
+
+	/*
+	Package pack;
+	pack.address.ip = "192.168.0.100";
+	pack.address.port = 69;
+	client.send_package(pack)
+	*/
 
 	Thread t1([&client]() { client.run_daemon(); });
 	Thread t2([&client]() { command_thread(client); });
